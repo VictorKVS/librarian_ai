@@ -9743,3 +9743,486 @@ AsyncSessionLocal = sessionmaker(
 async def get_db():
     async with AsyncSessionLocal() as session:
         yield session
+
+
+ Настройка Alembic — ключевой шаг для управления схемой базы данных, особенно в быстроразвивающемся проекте вроде Librarian AI. Вот зачем она нужна и как её грамотно интегрировать:
+
+🧭 Зачем Alembic в проекте?
+1. Контроль версий базы данных
+
+Позволяет отслеживать изменения в структуре таблиц (модели SQLAlchemy).
+
+Можно «откатить» или «накатить» изменения без потери данных (в разумных пределах).
+
+2. Командная работа и CI/CD
+
+Alembic обеспечивает синхронное обновление схемы у всех разработчиков и на всех окружениях.
+
+В связке с Docker и Git можно автоматически применять миграции при деплое.
+
+3. Безопасные обновления
+
+Изменения в схеме фиксируются в отдельные миграции, которые можно просмотреть, протестировать и проконтролировать перед применением.
+
+🏗 Архитектурная логика
+Alembic работает поверх SQLAlchemy, ссылается на Base.metadata.
+
+Конфигурация указывается в alembic.ini и env.py.
+
+Генерация миграций идёт через alembic revision --autogenerate.
+
+✅ Как это улучшает Librarian AI Core:
+Возможность	Пояснение
+Автоматические миграции	Автоматически создаются изменения при изменении моделей.
+Разделение логики и схемы	Код моделей остаётся чистым, миграции — отдельно.
+Обратимая история	Можно «переиграть» изменения (downgrade/upgrade).
+Совместимость с Alembic + async	Можно настроить даже для async-движков через sqlalchemy.ext.asyncio.
+
+ # 📁 Librarian AI — структура проекта (Windows)
+
+librarian_ai/
+├── README.md                    # 📘 Главная документация проекта, цели, установка, примеры использования
+├── alembic.ini                  # ⚙️ Конфигурация Alembic (путь к env.py, URL базы данных)
+│
+├── db/                         # 🗃️ Работа с базой данных и моделями
+│   ├── __init__.py              # Инициализация пакета db
+│   ├── create_tables.py         # Скрипт для создания всех таблиц из моделей вручную
+│   ├── models.py                # SQLAlchemy ORM-модели: документы, чанки, сущности и связи
+│   ├── schemas.py               # Pydantic-схемы для валидации данных (Document, Chunk, Entity, Graph)
+│   ├── session.py               # Асинхронное подключение к БД через SQLAlchemy
+│   ├── storage.py               # Унифицированный интерфейс к FAISS, pgvector и гибридному хранилищу
+│   └── alembic/                # Alembic: управление миграциями
+│       ├── env.py               # Скрипт Alembic, связывает metadata и URL
+│       ├── script.py.mako       # Шаблон генерации миграций
+│       └── versions/            # Каталог автосгенерированных миграций
+│
+├── ingest/                     # 📥 Модули загрузки и первичной обработки
+│   ├── loader.py               # Загрузка документов из файлов, папок, URL, API
+│   ├── parser.py               # Универсальный парсер текстов (PDF, DOCX, HTML, Markdown и т.п.)
+│   ├── chunker.py              # Деление текста на семантические чанки
+│   ├── async_tasks.py          # Фоновые задачи обработки (Celery)
+│   └── ingest_and_index.py     # Скрипт запуска всего пайплайна загрузки и индексации
+│
+├── processing/                 # 🧠 Модули смысловой обработки
+│   └── [будет добавлено]       # Извлечение сущностей (NER), построение графа знаний, связи
+│
+├── storage/                    # 🔎 Слои векторных хранилищ
+│   ├── faiss_index.py          # FAISS backend: хранение и поиск векторов локально
+│   ├── pgvector_store.py       # PostgreSQL + pgvector backend: хранение в БД
+│   └── [будет добавлено]       # Расширения, кэширование, облачные backend-и
+│
+├── scripts/                    # 🛠️ Скрипты администрирования и интеграции
+│   └── [будет добавлено]       # Очистка, миграции, тестовые загрузки
+│
+├── cli/                        # 🖥️ CLI-интерфейс
+│   └── [будет добавлено]       # Поддержка команд: ingest, reset, migrate, search
+│
+├── api/                        # 🌐 API-интерфейсы
+│   └── [будет добавлено]       # FastAPI endpoints, Telegram API, REST для бэкенда
+│
+├── tests/                      # ✅ Модульные и интеграционные тесты
+│   └── [будет добавлено]       # Pytest тесты для моделей, парсинга, хранилищ и API
+│
+├── utils/                      # 🔧 Вспомогательные модули и конфигурация
+│   ├── config.py               # Pydantic-настройки проекта: пути, API ключи, базы, переменные
+│   └── logging.py              # Инициализация и настройка логгера (формат, уровни, вывод)
+
+# Дополнительно (опционально):
+# ├── requirements.txt          # Зависимости проекта
+# ├── .env                      # Переменные окружения (не добавлять в git!)
+# └── Dockerfile / docker-compose.yml  # Контейнеризация и деплой
+
+
+
+from logging.config import fileConfig
+from sqlalchemy import engine_from_config, pool
+from alembic import context
+
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
+from db.models import Base
+from utils.config import settings
+
+# Alembic Config object
+config = context.config
+
+# Interpret the config file for Python logging.
+fileConfig(config.config_file_name)
+
+target_metadata = Base.metadata
+
+# Database URL из конфигурации проекта
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+
+def run_migrations_offline():
+    """Run migrations in 'offline' mode."""
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        compare_type=True
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+def run_migrations_online():
+    """Run migrations in 'online' mode."""
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section),
+        prefix='sqlalchemy.',
+        poolclass=pool.NullPool
+    )
+
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True
+        )
+
+        with context.begin_transaction():
+            context.run_migrations()
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+
+chat.deepseek.com
+
+
+import logging
+from logging.config import fileConfig
+from sqlalchemy import engine_from_config, pool
+from alembic import context
+import sys
+import os
+
+# Добавляем корень проекта в PYTHONPATH
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
+# Инициализация логгера перед загрузкой конфигурации
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('alembic.env')
+
+try:
+    from db.models import Base  # SQLAlchemy модели
+    from utils.config import settings  # Настройки проекта
+except ImportError as e:
+    logger.error("Ошибка импорта: %s", e)
+    raise
+
+# Получаем конфиг Alembic
+config = context.config
+
+# Настраиваем логирование (если есть alembic.ini)
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+# Метаданные SQLAlchemy для миграций
+target_metadata = Base.metadata
+
+# Устанавливаем URL БД из настроек проекта
+def get_database_url():
+    """Получает URL БД из настроек, с проверкой."""
+    db_url = settings.DATABASE_URL
+    if not db_url:
+        raise ValueError("DATABASE_URL не задан в настройках!")
+    return db_url
+
+config.set_main_option("sqlalchemy.url", get_database_url())
+
+def run_migrations_offline():
+    """Запуск миграций в offline-режиме (генерация SQL)."""
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+        compare_type=True,          # Сравнивать типы столбцов
+        compare_server_default=True,  # Сравнивать DEFAULT-значения
+        include_schemas=True,      # Учитывать схемы БД (если используются)
+        render_as_batch=True,      # Для совместимости с SQLite (ALTER TABLE)
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+def run_migrations_online():
+    """Запуск миграций в online-режиме (непосредственно в БД)."""
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            compare_server_default=True,
+            include_schemas=True,
+            render_as_batch=True,
+        )
+
+        with context.begin_transaction():
+            context.run_migrations()
+
+if context.is_offline_mode():
+    logger.info("Running migrations in OFFLINE mode (SQL output)")
+    run_migrations_offline()
+else:
+    logger.info("Running migrations in ONLINE mode (database connection)")
+    run_migrations_online()
+
+    лучшения:
+Лучшая обработка ошибок
+
+Добавлен try-except для импортов, чтобы избежать непонятных ошибок.
+
+Проверка DATABASE_URL перед использованием.
+
+Дополнительные параметры миграций
+
+compare_server_default=True – сравнивает значения по умолчанию в БД.
+
+include_schemas=True – поддерживает миграции в схемах (если БД использует их, например, PostgreSQL).
+
+render_as_batch=True – улучшает совместимость с SQLite (использует batch_alter_table).
+
+Логирование
+
+Добавлен логгер для отладки (alembic.env).
+
+Логирование перед запуском миграций (online/offline).
+
+Безопасность и читаемость
+
+Явная передача пустого словаря {} в get_section (избегаем None).
+
+Улучшенные docstrings.
+
+Дополнительные рекомендации:
+Если используете асинхронный SQLAlchemy (asyncpg, asyncmy), можно добавить поддержку async Alembic:
+
+python
+from alembic.runtime.environment import EnvironmentContext
+from sqlalchemy.ext.asyncio import AsyncEngine
+Можно добавить кастомные переменные окружения для гибкости:
+
+python
+import dotenv
+dotenv.load_dotenv()
+Этот вариант более надежный, удобный для отладки и поддерживает больше возможностей Alembic. 🚀
+
+✅ Уже реализовано:
+Полная интеграция с проектом:
+
+Добавлен путь в sys.path
+
+Импорт settings и Base с проверкой
+
+Безопасность и читаемость:
+
+Проверка на DATABASE_URL
+
+Логгирование ошибок импорта
+
+Настройки миграций:
+
+compare_type, compare_server_default, include_schemas, render_as_batch — всё для надёжной поддержки SQLite и pg
+
+Поддержка двух режимов:
+
+run_migrations_offline() для генерации SQL-файлов
+
+run_migrations_online() для применения напрямую в БД
+
+🔧 Рекомендации (опционально):
+Улучшение	Что сделать	Зачем
+✅ Уточнить target_metadata	Можно подключать сразу несколько Base.metadata, если модули разделены (например, from db.models.document import Base as DocBase)	Полезно в масштабируемых архитектурах
+✅ Проверка версии Alembic	Добавить: logger.info("Alembic version: %s", alembic.__version__)	Диагностика
+✅ Генерация логов в файл	Через logging.config.dictConfig() можно направить логи в migrations.log	Отладка CI/CD
+
+from logging.config import fileConfig
+from sqlalchemy import engine_from_config, pool
+from alembic import context
+
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
+from db.models import Base
+from utils.config import settings
+
+# Alembic Config object
+config = context.config
+
+# Interpret the config file for Python logging.
+fileConfig(config.config_file_name)
+
+target_metadata = Base.metadata
+
+# Database URL из конфигурации проекта
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+
+def run_migrations_offline():
+    """Run migrations in 'offline' mode."""
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        compare_type=True
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+def run_migrations_online():
+    """Run migrations in 'online' mode."""
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section),
+        prefix='sqlalchemy.',
+        poolclass=pool.NullPool
+    )
+
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True
+        )
+
+        with context.begin_transaction():
+            context.run_migrations()
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+
+
+from logging.config import fileConfig
+from sqlalchemy import engine_from_config, pool
+from alembic import context
+
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
+from db.models import Base
+from utils.config import settings
+
+# Alembic Config object
+config = context.config
+
+# Interpret the config file for Python logging.
+fileConfig(config.config_file_name)
+
+target_metadata = Base.metadata
+
+# Database URL из конфигурации проекта
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+
+def run_migrations_offline():
+    """Run migrations in 'offline' mode."""
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        compare_type=True
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+def run_migrations_online():
+    """Run migrations in 'online' mode."""
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section),
+        prefix='sqlalchemy.',
+        poolclass=pool.NullPool
+    )
+
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True
+        )
+
+        with context.begin_transaction():
+            context.run_migrations()
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+
+
+; 📄 Файл: alembic.ini
+; 📂 Путь: корень проекта /librarian_ai/
+; 📌 Назначение: Конфигурация Alembic для миграций
+
+[alembic]
+# Путь к директории Alembic (где лежит env.py и папка versions)
+script_location = db/alembic
+
+# Комментарий: URL БД переопределяется в env.py из settings.DATABASE_URL
+sqlalchemy.url = driver://user:pass@localhost/dbname
+
+# Шаблон имени файла миграции
+file_template = %(rev)s_%(slug)s
+
+# Формат идентификатора миграции (по умолчанию UUID4-like)
+# version_locations = db/alembic/versions
+
+# Если нужно выводить SQL-операции в лог (опционально)
+stdout = false
+
+# Миграции с batch mode (для SQLite)
+render_as_batch = true
+
+# Logging configuration
+[loggers]
+keys = root,sqlalchemy,alembic
+
+[handlers]
+keys = console
+
+[formatters]
+keys = generic
+
+[logger_root]
+level = WARN
+handlers = console
+qualname = 
+
+[logger_sqlalchemy]
+level = WARN
+handlers =
+qualname = sqlalchemy.engine
+
+[logger_alembic]
+level = INFO
+handlers =
+qualname = alembic
+
+[handler_console]
+class = StreamHandler
+args = (sys.stderr,)
+level = NOTSET
+formatter = generic
+
+[formatter_generic]
+format = %(levelname)-5.5s [%(name)s] %(message)s
+
+Готово. Файл alembic.ini создан с описанием и всеми необходимыми параметрами. Он расположен в корне проекта (/librarian_ai/) и конфигурирует Alembic для использования с вашим проектом. Если нужно — могу помочь настроить миграции или запустить первую.
