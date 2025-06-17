@@ -10226,3 +10226,1979 @@ formatter = generic
 format = %(levelname)-5.5s [%(name)s] %(message)s
 
 Готово. Файл alembic.ini создан с описанием и всеми необходимыми параметрами. Он расположен в корне проекта (/librarian_ai/) и конфигурирует Alembic для использования с вашим проектом. Если нужно — могу помочь настроить миграции или запустить первую.
+
+__init__.py
+# -*- coding: utf-8 -*-
+# 📄 Файл: __init__.py
+# 📂 Путь: core/tools/__init__.py
+# 📌 Назначение: Инициализация пакета утилит. Экспорт ключевых компонентов: эмбеддинг, NER, семантический поиск, генерация аннотаций
+
+# ——— Эмбеддинги ———
+from .embedder import EmbeddingService
+
+# ——— Извлечение сущностей (NER) ———
+from .extractor import extract_entities
+
+# ——— Семантический поиск ———
+from .semantic_search import SemanticSearch, semantic_search
+
+# ——— Генерация аннотаций ———
+from .summary_generator import SummaryGenerator, generate_summary
+
+# Ниже — опционально, при наличии этих модулей
+try:
+    from .graph_tools import GraphTools
+except ImportError:
+    GraphTools = None
+
+try:
+    from .loader import FileLoader, SmartLoader
+except ImportError:
+    FileLoader = SmartLoader = None
+
+try:
+    from .async_tasks import celery_app, create_status_task
+except ImportError:
+    celery_app = create_status_task = None
+
+__all__ = [
+    "EmbeddingService",
+    "extract_entities",
+    "SemanticSearch", "semantic_search",
+    "SummaryGenerator", "generate_summary",
+    # опционально
+    "FileLoader", "SmartLoader",
+    "GraphTools",
+    "celery_app", "create_status_task",
+]
+ 
+
+ # -*- coding: utf-8 -*-
+# 📄 Файл: archive_extractors.py
+# 📂 Путь: core/tools/archive_extractors.py
+# 📌 Назначение: Извлечение текста из ZIP-архивов с поддержкой декодирования и фильтрации
+
+import zipfile
+import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+def extract_text_from_zip(zip_path: str, extract_to: str = "./tmp") -> list[str]:
+    """
+    Извлекает текстовые файлы из ZIP-архива.
+
+    Args:
+        zip_path (str): Путь к архиву.
+        extract_to (str): Папка, куда извлекаются файлы.
+
+    Returns:
+        list[str]: Список текстов, извлечённых из файлов.
+    """
+    if not zipfile.is_zipfile(zip_path):
+        raise ValueError(f"{zip_path} не является корректным ZIP-архивом")
+
+    os.makedirs(extract_to, exist_ok=True)
+    texts = []
+
+    with zipfile.ZipFile(zip_path, 'r') as archive:
+        for filename in archive.namelist():
+            if not filename.endswith(('.txt', '.md', '.log', '.csv')):
+                logger.debug(f"Пропущен файл: {filename}")
+                continue
+            archive.extract(filename, path=extract_to)
+            full_path = os.path.join(extract_to, filename)
+            try:
+                with open(full_path, 'r', encoding='utf-8') as f:
+                    texts.append(f.read())
+            except UnicodeDecodeError:
+                logger.warning(f"Ошибка декодирования UTF-8: {filename}")
+            except Exception as e:
+                logger.error(f"Ошибка при чтении {filename}: {e}")
+
+    return texts
+
+
+Вот адаптированная версия core/tools/async_tasks.py для проекта Librarian AI mini, с описанием, типовыми блоками и сохранением структуры под Celery + Redis:
+
+python
+Копировать
+Редактировать
+# -*- coding: utf-8 -*-
+# 📄 Файл: async_tasks.py
+# 📂 Путь: core/tools/async_tasks.py
+# 📌 Назначение: Асинхронные Celery-задачи для обработки документов и статуса
+
+from celery import Celery
+from celery.result import AsyncResult
+import logging
+from typing import Dict, Any
+from datetime import datetime
+
+# Настройка логгера
+logger = logging.getLogger(__name__)
+
+# Настройка Celery (брокер и backend — Redis)
+celery_app = Celery(
+    "librarian_ai",
+    broker="redis://localhost:6379/0",
+    backend="redis://localhost:6379/1",
+)
+
+celery_app.conf.update(
+    task_serializer="json",
+    result_serializer="json",
+    accept_content=["json"],
+    task_track_started=True,
+    task_time_limit=600,  # 10 минут максимум
+    worker_prefetch_multiplier=1,
+)
+
+class DocumentProcessingError(Exception):
+    """Исключение для ошибок при обработке документов."""
+    pass
+
+@celery_app.task(bind=True, name="process_document")
+def process_document_async(self, doc_id: str) -> Dict[str, Any]:
+    """
+    Асинхронная задача обработки документа по ID.
+    Возвращает словарь с логами и статусами.
+    """
+    logs = []
+    started_at = datetime.utcnow().isoformat()
+
+    try:
+        def log(stage: str, progress: float):
+            logs.append(stage)
+            self.update_state(state='PROGRESS', meta={
+                "stage": stage,
+                "progress": progress,
+                "logs": logs,
+                "started_at": started_at
+            })
+            logger.info(f"[{doc_id}] {stage}")
+
+        # === Пример пайплайна ===
+        log("📥 Загрузка документа", 0.1)
+        # document = load_document(doc_id)
+
+        log("🔍 Чанкование и анализ", 0.4)
+        # chunks = chunker(document)
+
+        log("📐 Векторизация", 0.6)
+        # embeddings = embed(chunks)
+
+        log("🧠 Аннотирование / извлечение сущностей", 0.8)
+        # entities = extract_entities(embeddings)
+
+        log("💾 Сохранение в БД / хранилище", 0.95)
+        # store(doc_id, embeddings, entities)
+
+        finished_at = datetime.utcnow().isoformat()
+        return {
+            "status": "done",
+            "doc_id": doc_id,
+            "progress": 1.0,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "logs": logs,
+        }
+
+    except Exception as e:
+        error_msg = f"[{doc_id}] ❌ Ошибка обработки: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        logs.append(error_msg)
+        self.update_state(state='FAILURE', meta={
+            "error": error_msg,
+            "progress": 0.0,
+            "logs": logs,
+            "started_at": started_at
+        })
+        raise DocumentProcessingError(error_msg) from e
+
+def get_task_status(task_id: str) -> Dict[str, Any]:
+    """
+    Проверка статуса задачи по ID.
+    """
+    result = AsyncResult(task_id, app=celery_app)
+    status = {
+        "task_id": task_id,
+        "status": result.status,
+        "result": result.result
+    }
+
+    if result.status == "PROGRESS":
+        status.update(result.info or {})
+    elif result.status == "FAILURE":
+        status["error"] = str(result.info)
+
+    return status
+
+def cancel_task(task_id: str) -> Dict[str, Any]:
+    """
+    Принудительное завершение задачи по ID.
+    """
+    try:
+        result = AsyncResult(task_id, app=celery_app)
+        result.revoke(terminate=True)
+        logger.warning(f"Задача {task_id} отменена вручную")
+        return {"task_id": task_id, "success": True, "message": "Задача отменена"}
+    except Exception as e:
+        logger.error(f"Ошибка отмены задачи {task_id}: {str(e)}")
+        return {"task_id": task_id, "success": False, "message": f"Ошибка отмены: {str(e)}"}
+✅ Адаптировано:
+
+Название и путь
+
+Комментарии к каждому блоку
+
+Логика оформления под Librarian mini
+
+Стандартные load → chunk → embed → extract → store шаги
+
+Хочешь — настрою Celery worker и Flower для мониторинга.
+
+
+
+embedder.py
+# -*- coding: utf-8 -*-
+# 📄 Файл: embedder.py
+# 📂 Путь: core/tools/embedder.py
+# 📌 Назначение: Генерация эмбеддингов текста с помощью Sentence-Transformers
+
+from typing import List, Optional, Union
+import logging
+import numpy as np
+
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:
+    raise ImportError(
+        "SentenceTransformer не установлен. Установите пакет:\n"
+        "    pip install sentence-transformers"
+    )
+
+# Логгер
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
+class EmbeddingService:
+    """
+    Сервис генерации эмбеддингов для текста.
+
+    Использует SentenceTransformer (например, 'all-MiniLM-L6-v2').
+    Поддерживает одиночные строки и батчи. Есть опция нормализации векторов.
+
+    Пример:
+        embedder = EmbeddingService()
+        vec = embedder.embed_text("Пример текста")
+        batch = embedder.embed_batch(["текст 1", "текст 2"])
+    """
+
+    def __init__(
+        self,
+        model_name: str = "all-MiniLM-L6-v2",
+        device: str = "cpu",
+        normalize_embeddings: bool = True,
+        **model_kwargs
+    ):
+        self.model_name = model_name
+        self.device = device
+        self.normalize_embeddings = normalize_embeddings
+        self.model_kwargs = model_kwargs
+
+        logger.info(f"Загрузка модели эмбеддинга: {model_name} → {device}")
+        try:
+            self.model = SentenceTransformer(model_name, device=device, **model_kwargs)
+            # Пробный эмбеддинг
+            test_vec = self.model.encode("тест", normalize_embeddings=normalize_embeddings)
+            self.embedding_dim = test_vec.shape[0]
+            logger.info(f"✅ Загружено. Размерность векторов: {self.embedding_dim}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка при загрузке модели: {e}")
+            raise
+
+    def embed_text(
+        self,
+        text: str,
+        normalize: Optional[bool] = None,
+        convert_to_numpy: bool = True
+    ) -> Union[List[float], np.ndarray]:
+        """
+        Эмбеддинг одной строки текста.
+
+        Args:
+            text: Текст для преобразования.
+            normalize: Принудительная нормализация (иначе — из init).
+            convert_to_numpy: Вернуть np.array или list.
+
+        Returns:
+            Вектор эмбеддинга.
+        """
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("Текст должен быть непустой строкой.")
+
+        normalize = self.normalize_embeddings if normalize is None else normalize
+
+        try:
+            vec = self.model.encode(
+                text,
+                normalize_embeddings=normalize,
+                convert_to_tensor=False,
+                show_progress_bar=False
+            )
+            return np.array(vec) if convert_to_numpy else vec
+        except Exception as e:
+            logger.error(f"❌ Ошибка эмбеддинга текста: {e}")
+            raise
+
+    def embed_batch(
+        self,
+        texts: List[str],
+        batch_size: int = 32,
+        normalize: Optional[bool] = None,
+        convert_to_numpy: bool = True
+    ) -> Union[np.ndarray, List[List[float]]]:
+        """
+        Эмбеддинг списка текстов.
+
+        Args:
+            texts: Список строк.
+            batch_size: Размер батча.
+            normalize: Принудительная нормализация.
+            convert_to_numpy: Вернуть np.array или list of lists.
+
+        Returns:
+            Массив эмбеддингов.
+        """
+        if not isinstance(texts, list) or not all(isinstance(t, str) for t in texts):
+            raise ValueError("texts должен быть списком строк.")
+
+        normalize = self.normalize_embeddings if normalize is None else normalize
+
+        try:
+            result = self.model.encode(
+                texts,
+                batch_size=batch_size,
+                normalize_embeddings=normalize,
+                convert_to_tensor=False,
+                show_progress_bar=False
+            )
+            return np.array(result) if convert_to_numpy else result
+        except Exception as e:
+            logger.error(f"❌ Ошибка батч-эмбеддинга: {e}")
+            raise
+
+    def get_embedding_dimension(self) -> int:
+        """
+        Возвращает размерность эмбеддингов.
+        """
+        return self.embedding_dim
+
+    def __repr__(self):
+        return (
+            f"<EmbeddingService(model_name={self.model_name}, "
+            f"device={self.device}, "
+            f"embedding_dim={self.embedding_dim})>"
+        )
+
+Поддержка mini-архитектуры:
+
+✅ Простота использования
+
+✅ Поддержка cpu / cuda
+
+✅ Совместимость с FAISS, pgvector, Numpy
+
+Если хочешь, можно сделать обёртку EmbedderCLI — для CLI-интерфейса или API-модуля.
+
+# -*- coding: utf-8 -*-
+# 📄 Файл: extractor.py
+# 📂 Путь: core/tools/extractor.py
+# 📌 Назначение: Извлечение сущностей (NER) из текста — пока заглушка
+
+from typing import Dict
+
+def extract_entities(text: str) -> Dict[str, list]:
+    """
+    📌 Временно заглушка.
+    Извлекает именованные сущности из текста (NER).
+
+    В будущем: будет использовать модель SpaCy, HuggingFace или OpenAI для определения сущностей:
+        - PERSON, ORG, LOCATION, EVENT, CONCEPT, ...
+
+    Args:
+        text (str): Исходный текст
+
+    Returns:
+        dict: Категории сущностей и соответствующие элементы
+    """
+    # TODO: интеграция NER-модели (например, spacy.load("en_core_web_sm") или transformers)
+    return {
+        "PERSON": [],
+        "ORG": [],
+        "LOCATION": [],
+        "EVENT": [],
+        "CONCEPT": [],
+    }
+💡 Когда ты будешь готов подключать NER:
+
+Можно использовать SpaCy (быстро, локально)
+
+Или transformers от Hugging Face для более точных моделей
+
+Или вызывать API OpenAI / Anthropic / Mistral, если нужно в облаке
+
+Хочешь — сразу могу дать реализацию на spaCy или transformers.
+
+
+Вот адаптированная и улучшенная версия core/tools/extractor.py с комментарием, описанием и заглушкой, готовой для будущей интеграции моделей:
+
+python
+Копировать
+Редактировать
+# -*- coding: utf-8 -*-
+# 📄 Файл: extractor.py
+# 📂 Путь: core/tools/extractor.py
+# 📌 Назначение: Извлечение сущностей (NER) из текста — пока заглушка
+
+from typing import Dict
+
+def extract_entities(text: str) -> Dict[str, list]:
+    """
+    📌 Временно заглушка.
+    Извлекает именованные сущности из текста (NER).
+
+    В будущем: будет использовать модель SpaCy, HuggingFace или OpenAI для определения сущностей:
+        - PERSON, ORG, LOCATION, EVENT, CONCEPT, ...
+
+    Args:
+        text (str): Исходный текст
+
+    Returns:
+        dict: Категории сущностей и соответствующие элементы
+    """
+    # TODO: интеграция NER-модели (например, spacy.load("en_core_web_sm") или transformers)
+    return {
+        "PERSON": [],
+        "ORG": [],
+        "LOCATION": [],
+        "EVENT": [],
+        "CONCEPT": [],
+    }
+💡 Когда ты будешь готов подключать NER:
+
+Можно использовать SpaCy (быстро, локально)
+
+Или transformers от Hugging Face для более точных моделей
+
+Или вызывать API OpenAI / Anthropic / Mistral, если нужно в облаке
+
+Хочешь — сразу могу дать реализацию на spaCy или transformers.
+
+Вот улучшенная и адаптированная версия core/tools/graph_tools.py с пояснениями, валидацией и расширением функционала:
+
+python
+Копировать
+Редактировать
+# -*- coding: utf-8 -*-
+# 📄 Файл: graph_tools.py
+# 📂 Путь: core/tools/graph_tools.py
+# 📌 Назначение: Хранение и работа с графом знаний (узлы и связи)
+
+from typing import List, Dict
+
+
+class GraphStore:
+    """
+    📘 Класс для построения простого графа знаний:
+    - Хранит узлы и связи
+    - Позволяет добавлять, экспортировать и фильтровать графовые данные
+    """
+
+    def __init__(self):
+        self.nodes: List[Dict] = []
+        self.edges: List[Dict] = []
+
+    def add_node(self, node_id: str, metadata: Dict) -> None:
+        """
+        Добавить узел (сущность) в граф.
+
+        Args:
+            node_id (str): Уникальный идентификатор узла
+            metadata (dict): Дополнительные сведения (например, имя, тип, описание)
+        """
+        if not node_id or not isinstance(metadata, dict):
+            raise ValueError("node_id должен быть строкой, metadata — словарём")
+        self.nodes.append({"id": node_id, "meta": metadata})
+
+    def add_edge(self, src: str, dst: str, label: str) -> None:
+        """
+        Добавить связь между двумя узлами.
+
+        Args:
+            src (str): ID исходного узла
+            dst (str): ID целевого узла
+            label (str): Тип или метка связи
+        """
+        if not src or not dst or not label:
+            raise ValueError("src, dst и label обязательны")
+        self.edges.append({"src": src, "dst": dst, "label": label})
+
+    def get_graph(self) -> Dict[str, List[Dict]]:
+        """
+        Возвращает граф целиком (в виде словаря).
+
+        Returns:
+            dict: {'nodes': [...], 'edges': [...]}
+        """
+        return {
+            "nodes": self.nodes,
+            "edges": self.edges
+        }
+
+    def clear(self) -> None:
+        """Очистить граф полностью."""
+        self.nodes.clear()
+        self.edges.clear()
+
+    def __repr__(self) -> str:
+        return f"<GraphStore nodes={len(self.nodes)}, edges={len(self.edges)}>"
+📦 Дополнительно можно добавить:
+
+Поддержку сохранения в файл (JSON/GraphML)
+
+Визуализацию (через NetworkX + matplotlib или PyVis)
+
+Готов перейти к summary_generator.py?
+
+
+loader.py
+# 📄 core/tools/loader.py
+# 📌 Назначение: Оптимизированная загрузка и обработка файлов
+
+import os
+import asyncio
+import logging
+from typing import List, Tuple, Optional, Dict, Union
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+import magic
+from dataclasses import dataclass
+from datetime import datetime
+import hashlib
+
+from utils.file_utils import (
+    extract_text_from_pdf, extract_text_from_docx, extract_text_from_xlsx,
+    extract_text_from_pptx, extract_text_from_odf, extract_text_from_html,
+    extract_text_from_txt, extract_text_from_image
+)
+from core.tools.archive_extractors import extract_text_from_archive
+
+logger = logging.getLogger(__name__)
+
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+CACHE_LIMIT = 100
+CHUNK_SIZE_DEFAULT = 1000
+
+@dataclass
+class FileMetadata:
+    name: str
+    size: int
+    modified: float
+    mime_type: str
+    checksum: str
+    language: str = "en"
+
+@dataclass
+class ProcessingResult:
+    chunks: List[str]
+    metadata: FileMetadata
+    processing_time: float
+
+SUPPORTED_MIME_TYPES = {
+    'application/pdf': 'pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'application/vnd.oasis.opendocument.text': 'odt',
+    'text/html': 'html',
+    'text/plain': 'txt',
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'application/zip': 'zip',
+    'application/x-tar': 'tar',
+    'application/x-rar-compressed': 'rar'
+}
+
+def calculate_checksum(file_path: str) -> str:
+    sha256 = hashlib.sha256()
+    with open(file_path, 'rb') as f:
+        while chunk := f.read(8192):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+class FileProcessingError(Exception):
+    pass
+
+class FileLoader:
+    def __init__(self, chunker: 'TextChunker', max_workers: int = 4):
+        self.chunker = chunker
+        self.max_workers = max_workers
+        self._cache: Dict[str, ProcessingResult] = {}
+        self._cache_hits = 0
+
+    async def load_file(self, file_path: Union[str, Path], chunk_size: int = CHUNK_SIZE_DEFAULT, max_chunks: Optional[int] = None, language: str = "en") -> ProcessingResult:
+        file_path = str(file_path)
+        if file_path in self._cache:
+            self._cache_hits += 1
+            return self._cache[file_path]
+
+        if not self._validate_file(file_path):
+            raise FileProcessingError(f"Invalid file: {file_path}")
+
+        start_time = datetime.now().timestamp()
+        metadata = await self._get_file_metadata(file_path)
+
+        try:
+            text = await self._extract_text(file_path, metadata.mime_type)
+            chunks = self.chunker.chunk(text, chunk_size, language)
+            if max_chunks and len(chunks) > max_chunks:
+                chunks = chunks[:max_chunks]
+                logger.warning(f"Truncated to {max_chunks} chunks for {file_path}")
+
+            result = ProcessingResult(chunks=chunks, metadata=metadata, processing_time=datetime.now().timestamp() - start_time)
+            self._cache[file_path] = result
+            self.clear_least_used_cache()
+            return result
+        except Exception as e:
+            logger.error(f"Error processing {file_path}: {str(e)}", exc_info=True)
+            raise FileProcessingError(f"Failed to process {file_path}") from e
+
+    async def load_files(self, file_paths: List[Union[str, Path]], chunk_size: int = CHUNK_SIZE_DEFAULT, max_workers: Optional[int] = None, timeout: int = 300) -> List[ProcessingResult]:
+        results = []
+        max_workers = max_workers or self.max_workers
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            loop = asyncio.get_event_loop()
+            futures = [
+                loop.run_in_executor(executor, lambda p=path: asyncio.run(self.load_file(p, chunk_size)))
+                for path in file_paths
+            ]
+            for future in as_completed(futures, timeout=timeout):
+                try:
+                    results.append(await future)
+                except Exception as e:
+                    logger.error(f"File processing failed: {str(e)}")
+                    continue
+        return results
+
+    async def _extract_text(self, file_path: str, mime_type: str) -> str:
+        file_type = SUPPORTED_MIME_TYPES.get(mime_type)
+        if not file_type:
+            raise ValueError(f"Unsupported file type: {mime_type}")
+
+        extractors = {
+            'pdf': extract_text_from_pdf,
+            'docx': extract_text_from_docx,
+            'pptx': extract_text_from_pptx,
+            'xlsx': extract_text_from_xlsx,
+            'odt': extract_text_from_odf,
+            'html': extract_text_from_html,
+            'txt': extract_text_from_txt,
+            'jpg': extract_text_from_image,
+            'png': extract_text_from_image,
+            'zip': extract_text_from_archive,
+            'rar': extract_text_from_archive,
+            'tar': extract_text_from_archive
+        }
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: extractors[file_type](file_path))
+
+    async def _get_file_metadata(self, file_path: str) -> FileMetadata:
+        path = Path(file_path)
+        mime_type, file_type = detect_file_type(file_path)
+        return FileMetadata(
+            name=path.name,
+            size=path.stat().st_size,
+            modified=path.stat().st_mtime,
+            mime_type=mime_type,
+            checksum=calculate_checksum(file_path),
+            language=self._detect_language(file_path)
+        )
+
+    def _validate_file(self, file_path: str) -> bool:
+        try:
+            path = Path(file_path)
+            return all([
+                path.exists(),
+                path.is_file(),
+                path.stat().st_size <= MAX_FILE_SIZE,
+                detect_file_type(file_path)[1] != 'unknown'
+            ])
+        except Exception:
+            return False
+
+    def _detect_language(self, file_path: str) -> str:
+        return "en"
+
+    def clear_least_used_cache(self):
+        if len(self._cache) > CACHE_LIMIT:
+            sorted_keys = sorted(self._cache.keys(), key=lambda k: self._cache[k].processing_time, reverse=False)
+            least_used_key = sorted_keys[0]
+            del self._cache[least_used_key]
+
+    def clear_cache(self):
+        self._cache.clear()
+        self._cache_hits = 0
+
+    @property
+    def cache_info(self) -> Dict[str, int]:
+        return {
+            'cache_size': len(self._cache),
+            'cache_hits': self._cache_hits
+        }
+
+def detect_file_type(file_path: str) -> Tuple[str, str]:
+    mime = magic.from_file(file_path, mime=True)
+    return mime, SUPPORTED_MIME_TYPES.get(mime, 'unknown')
+
+def create_file_loader(chunker: 'TextChunker', max_workers: int = 4) -> FileLoader:
+    return FileLoader(chunker, max_workers)
+
+from core.parser.chunker import TextChunker
+
+async def load_documents(paths: List[str]) -> List[ProcessingResult]:
+    chunker = TextChunker()
+    loader = create_file_loader(chunker)
+    return await loader.load_files(paths)
+
+
+
+Вот улучшенная и дополненная версия core/tools/semantic_search.py:
+
+python
+Копировать
+Редактировать
+# 📄 core/tools/semantic_search.py
+# 📌 Назначение: Семантический поиск по векторному хранилищу (FAISS, pgvector и др.)
+
+from typing import List, Dict, Union
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class SemanticSearch:
+    """
+    Класс для семантического поиска по векторным представлениям текста.
+
+    Использует клиент к векторному хранилищу (например, FAISS, pgvector, гибрид).
+    """
+
+    def __init__(self, vector_store_client):
+        """
+        Args:
+            vector_store_client: Объект, реализующий методы .add(), .search(), .delete()
+        """
+        self.client = vector_store_client
+
+    def query(self, query_text: str, top_k: int = 5) -> List[Dict[str, Union[str, float]]]:
+        """
+        Выполняет поиск по семантике текста.
+
+        Args:
+            query_text: Входной текст запроса
+            top_k: Количество результатов
+
+        Returns:
+            Список документов с полями: id, score, metadata, chunk
+        """
+        if not query_text.strip():
+            raise ValueError("Query text is empty")
+
+        try:
+            logger.info(f"🔍 Semantic search: '{query_text}' (top_k={top_k})")
+            results = self.client.search(query_text, top_k=top_k)
+            logger.info(f"✅ Found {len(results)} matches")
+            return results
+        except Exception as e:
+            logger.error(f"❌ Semantic search failed: {e}", exc_info=True)
+            raise
+
+    def batch_query(self, queries: List[str], top_k: int = 5) -> Dict[str, List[Dict]]:
+        """
+        Пакетный поиск по нескольким запросам.
+
+        Args:
+            queries: Список текстов запросов
+            top_k: Количество результатов на каждый запрос
+
+        Returns:
+            Словарь: {запрос: [результаты]}
+        """
+        results = {}
+        for query in queries:
+            try:
+                results[query] = self.query(query, top_k)
+            except Exception as e:
+                results[query] = [{"error": str(e)}]
+        return results
+💡 Пояснение:
+
+Добавлена валидация входа и логгирование
+
+Метод batch_query() — удобен для мультизапросов (например, в интерфейсе)
+
+Структура результатов оставлена гибкой: id, score, metadata, chunk — по контракту хранилища
+
+Готов закоммитить или улучшить под конкретный тип хранилища (pgvector, FAISS)?
+
+
+
+
+Вот улучшенная и дополненная версия core/tools/semantic_search.py:
+
+python
+Копировать
+Редактировать
+# 📄 core/tools/semantic_search.py
+# 📌 Назначение: Семантический поиск по векторному хранилищу (FAISS, pgvector и др.)
+
+from typing import List, Dict, Union
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class SemanticSearch:
+    """
+    Класс для семантического поиска по векторным представлениям текста.
+
+    Использует клиент к векторному хранилищу (например, FAISS, pgvector, гибрид).
+    """
+
+    def __init__(self, vector_store_client):
+        """
+        Args:
+            vector_store_client: Объект, реализующий методы .add(), .search(), .delete()
+        """
+        self.client = vector_store_client
+
+    def query(self, query_text: str, top_k: int = 5) -> List[Dict[str, Union[str, float]]]:
+        """
+        Выполняет поиск по семантике текста.
+
+        Args:
+            query_text: Входной текст запроса
+            top_k: Количество результатов
+
+        Returns:
+            Список документов с полями: id, score, metadata, chunk
+        """
+        if not query_text.strip():
+            raise ValueError("Query text is empty")
+
+        try:
+            logger.info(f"🔍 Semantic search: '{query_text}' (top_k={top_k})")
+            results = self.client.search(query_text, top_k=top_k)
+            logger.info(f"✅ Found {len(results)} matches")
+            return results
+        except Exception as e:
+            logger.error(f"❌ Semantic search failed: {e}", exc_info=True)
+            raise
+
+    def batch_query(self, queries: List[str], top_k: int = 5) -> Dict[str, List[Dict]]:
+        """
+        Пакетный поиск по нескольким запросам.
+
+        Args:
+            queries: Список текстов запросов
+            top_k: Количество результатов на каждый запрос
+
+        Returns:
+            Словарь: {запрос: [результаты]}
+        """
+        results = {}
+        for query in queries:
+            try:
+                results[query] = self.query(query, top_k)
+            except Exception as e:
+                results[query] = [{"error": str(e)}]
+        return results
+💡 Пояснение:
+
+Добавлена валидация входа и логгирование
+
+Метод batch_query() — удобен для мультизапросов (например, в интерфейсе)
+
+Структура результатов оставлена гибкой: id, score, metadata, chunk — по контракту хранилища
+
+Готов закоммитить или улучшить под конкретный тип хранилища (pgvector, FAISS)?
+
+/chat.deepseek.com
+
+# Инициализация
+search_engine = SemanticSearch(
+    vector_store_client=VectorStoreClient(),
+    text_processor=TextProcessor()
+)
+
+# Создание параметров поиска
+params = SearchParams(
+    query="новейшие исследования в области ИИ",
+    top_k=10,
+    strategy=SearchStrategy.HYBRID,
+    filters={"year": ["2023", "2024"], "language": "ru"}
+)
+
+# Выполнение поиска
+results = await search_engine.query(params)
+
+# Пакетный поиск
+batch_params = [
+    SearchParams(query="машинное обучение"),
+    SearchParams(query="нейронные сети", top_k=7)
+]
+batch_results = await search_engine.batch_query(batch_params)
+
+# 📄 core/tools/semantic_search.py
+# 📌 Назначение: Расширенный семантический поиск (гибридный, фильтрация, пакетный)
+
+from typing import List, Dict, Optional, Union
+from enum import Enum
+from dataclasses import dataclass
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class SearchStrategy(str, Enum):
+    DENSE = "dense"
+    SPARSE = "sparse"
+    HYBRID = "hybrid"
+
+
+@dataclass
+class SearchParams:
+    query: str
+    top_k: int = 5
+    strategy: SearchStrategy = SearchStrategy.DENSE
+    filters: Optional[Dict[str, Union[str, List[str]]]] = None
+
+
+class SemanticSearch:
+    """
+    Расширенный семантический поиск с поддержкой стратегий и фильтров.
+    """
+    def __init__(self, vector_store_client, text_processor=None):
+        self.client = vector_store_client
+        self.text_processor = text_processor
+
+    async def query(self, params: SearchParams) -> List[Dict]:
+        """
+        Выполняет асинхронный поиск по заданным параметрам.
+
+        Args:
+            params: Объект SearchParams
+
+        Returns:
+            Список результатов (id, score, metadata, chunk)
+        """
+        query_text = params.query.strip()
+        if not query_text:
+            raise ValueError("Empty search query")
+
+        logger.info(f"🔍 Search query: '{query_text}' (strategy={params.strategy}, top_k={params.top_k})")
+
+        # Опциональная предобработка текста
+        if self.text_processor:
+            query_text = self.text_processor.process(query_text)
+
+        # Выполнение поиска по стратегии
+        if params.strategy == SearchStrategy.DENSE:
+            return await self.client.search_dense(query_text, top_k=params.top_k, filters=params.filters)
+        elif params.strategy == SearchStrategy.SPARSE:
+            return await self.client.search_sparse(query_text, top_k=params.top_k, filters=params.filters)
+        elif params.strategy == SearchStrategy.HYBRID:
+            return await self.client.search_hybrid(query_text, top_k=params.top_k, filters=params.filters)
+        else:
+            raise ValueError(f"Unsupported search strategy: {params.strategy}")
+
+    async def batch_query(self, batch_params: List[SearchParams]) -> Dict[str, List[Dict]]:
+        """
+        Выполняет поиск по списку параметров.
+
+        Returns:
+            Словарь: {query: [результаты]}
+        """
+        results = {}
+        for param in batch_params:
+            try:
+                res = await self.query(param)
+                results[param.query] = res
+            except Exception as e:
+                logger.error(f"❌ Search failed for '{param.query}': {str(e)}", exc_info=True)
+                results[param.query] = [{"error": str(e)}]
+        return results
+
+ Что улучшено:
+
+Введена типизация параметров через SearchParams
+
+Поддержка стратегий dense/sparse/hybrid
+
+Учитываются фильтры (filters)
+
+Поддержка await, если клиент асинхронный
+
+Хочешь — добавим типовой VectorStoreClient с методами search_dense, search_hybrid, search_sparse?
+
+chat.deepseek.
+
+# chat.deepseek.com
+# 📄 Файл: semantic_search.py
+# 📂 Путь: core/tools/
+# 📌 Назначение: Продвинутый семантический поиск с гибридными стратегиями и кэшированием
+
+from typing import List, Dict, Optional, Union, AsyncGenerator
+from enum import Enum
+from dataclasses import dataclass
+import logging
+import numpy as np
+from functools import lru_cache
+from pydantic import BaseModel, Field, validator
+from datetime import datetime
+from config import settings
+import asyncio
+
+logger = logging.getLogger(__name__)
+
+class SearchStrategy(str, Enum):
+    """Стратегии семантического поиска"""
+    DENSE = "dense"      # Плотные векторные эмбеддинги
+    SPARSE = "sparse"    # Разреженные (TF-IDF/BM25)
+    HYBRID = "hybrid"    # Гибридный подход
+    RERANK = "rerank"    # С переранжированием
+
+class SearchParams(BaseModel):
+    """Параметры поиска с валидацией"""
+    query: str = Field(..., min_length=1)
+    top_k: int = Field(5, ge=1, le=100)
+    strategy: SearchStrategy = SearchStrategy.HYBRID
+    min_score: float = Field(0.3, ge=0, le=1)
+    filters: Optional[Dict[str, Union[str, List[str]]]] = None
+    use_cache: bool = Field(True)
+
+    @validator('query')
+    def validate_query(cls, v):
+        cleaned = v.strip()
+        if len(cleaned) < 2:
+            raise ValueError("Query too short")
+        return cleaned
+
+@dataclass
+class SearchResult:
+    """Результат поиска с расширенными метаданными"""
+    id: str
+    score: float
+    content: str
+    metadata: Dict
+    vector: Optional[np.ndarray] = None
+    keywords: Optional[List[str]] = None
+    timestamp: Optional[datetime] = None
+
+class SemanticSearch:
+    """
+    Усовершенствованный семантический поиск с:
+    - Поддержкой нескольких стратегий
+    - Кэшированием запросов
+    - Гибкой фильтрацией
+    - Асинхронным выполнением
+    """
+
+    def __init__(self, vector_store_client, text_processor=None):
+        """
+        Args:
+            vector_store_client: Клиент векторного хранилища
+            text_processor: Процессор текста для расширенных функций
+        """
+        self.client = vector_store_client
+        self.text_processor = text_processor
+        self._setup_logging()
+
+    def _setup_logging(self):
+        """Настройка детального логирования"""
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            '%(asctime)s | %(levelname)s | %(message)s'))
+        logger.addHandler(handler)
+        logger.setLevel(settings.LOG_LEVEL)
+
+    @lru_cache(maxsize=1000)
+    def _get_query_embedding(self, query: str) -> np.ndarray:
+        """Кэшированное получение эмбеддинга запроса"""
+        if self.text_processor:
+            return self.text_processor.embed_query(query)
+        return self.client.get_embedding(query)
+
+    async def query(self, params: SearchParams) -> List[SearchResult]:
+        """
+        Асинхронный поиск с расширенными параметрами.
+        
+        Args:
+            params: Параметры поиска
+            
+        Returns:
+            Отсортированный список результатов SearchResult
+        """
+        logger.info(f"Search: '{params.query[:50]}...' (strategy={params.strategy})")
+        
+        try:
+            # Выбор стратегии поиска
+            if params.strategy == SearchStrategy.DENSE:
+                results = await self._dense_search(params)
+            elif params.strategy == SearchStrategy.SPARSE:
+                results = await self._sparse_search(params)
+            elif params.strategy == SearchStrategy.HYBRID:
+                results = await self._hybrid_search(params)
+            elif params.strategy == SearchStrategy.RERANK:
+                results = await self._rerank_search(params)
+            else:
+                raise ValueError(f"Unknown strategy: {params.strategy}")
+
+            # Применение фильтров
+            if params.filters:
+                results = self._apply_filters(results, params.filters)
+                
+            # Фильтрация по min_score
+            results = [r for r in results if r.score >= params.min_score]
+            
+            logger.info(f"Found {len(results)} results")
+            return sorted(results, key=lambda x: x.score, reverse=True)[:params.top_k]
+            
+        except Exception as e:
+            logger.error(f"Search failed: {str(e)}", exc_info=True)
+            raise
+
+    async def _dense_search(self, params: SearchParams) -> List[SearchResult]:
+        """Плотный векторный поиск"""
+        embedding = self._get_query_embedding(params.query)
+        raw_results = await self.client.search_dense(
+            embedding=embedding,
+            top_k=params.top_k * 3,  # Берем больше для последующей фильтрации
+            filters=params.filters
+        )
+        return self._format_results(raw_results)
+
+    async def _hybrid_search(self, params: SearchParams) -> List[SearchResult]:
+        """Гибридный поиск (вектор + ключевые слова)"""
+        # Векторный поиск
+        vector_results = await self._dense_search(params)
+        
+        # Извлечение ключевых слов
+        keywords = []
+        if self.text_processor:
+            keywords = self.text_processor.extract_keywords(params.query)
+        
+        if keywords:
+            # Комбинирование score
+            scored_results = []
+            for result in vector_results:
+                keyword_score = self._calc_keyword_score(result, keywords)
+                combined_score = (result.score * 0.7) + (keyword_score * 0.3)
+                scored_results.append(SearchResult(
+                    **{**result.__dict__, 'score': combined_score, 'keywords': keywords}
+                ))
+            return scored_results
+            
+        return vector_results
+
+    async def batch_query(self, queries: List[SearchParams]) -> Dict[str, List[SearchResult]]:
+        """
+        Пакетный поиск с прогресс-баром.
+        
+        Args:
+            queries: Список параметров поиска
+            
+        Returns:
+            Словарь {запрос: результаты}
+        """
+        from tqdm.asyncio import tqdm_asyncio
+        
+        results = {}
+        tasks = [self.query(params) for params in queries]
+        
+        try:
+            completed = await tqdm_asyncio.gather(
+                *tasks,
+                desc="Processing queries",
+                total=len(queries))
+            
+            for params, result in zip(queries, completed):
+                results[params.query] = result
+                
+        except Exception as e:
+            logger.error(f"Batch query failed: {str(e)}")
+            raise
+            
+        return results
+
+    def _format_results(self, raw_results: List[Dict]) -> List[SearchResult]:
+        """Форматирование сырых результатов"""
+        return [
+            SearchResult(
+                id=r['id'],
+                score=r['score'],
+                content=r['content'],
+                metadata=r.get('metadata', {}),
+                vector=r.get('vector'),
+                timestamp=r.get('timestamp')
+            ) for r in raw_results
+        ]
+
+    def _calc_keyword_score(self, result: SearchResult, keywords: List[str]) -> float:
+        """Вычисление score за ключевые слова"""
+        if not keywords:
+            return 0.0
+            
+        content = result.content.lower()
+        matches = sum(1 for kw in keywords if kw.lower() in content)
+        return min(matches / len(keywords), 1.0)
+
+    def _apply_filters(self, results: List[SearchResult], filters: Dict) -> List[SearchResult]:
+        """Применение фильтров к результатам"""
+        return [
+            r for r in results
+            if all(
+                r.metadata.get(key) in (values if isinstance(values, list) else [values])
+                for key, values in filters.items()
+            )
+        ]
+
+Ты уже на финальном этапе — класс SemanticSearch у тебя реализован мощно и продвинуто 💡. Чтобы довести его до продуктового уровня, вот что можно улучшить и дополнить:
+
+🔧 Улучшения и дополнения
+1. Поддержка SPARSE и RERANK стратегий (заглушки)
+Добавим базовые методы _sparse_search и _rerank_search, чтобы исключить NotImplementedError:
+
+python
+Копировать
+Редактировать
+async def _sparse_search(self, params: SearchParams) -> List[SearchResult]:
+    """Разреженный поиск (например, TF-IDF / BM25) — временная заглушка"""
+    logger.warning("Sparse search not implemented — returning empty list")
+    return []
+
+async def _rerank_search(self, params: SearchParams) -> List[SearchResult]:
+    """Поиск с повторным ранжированием"""
+    base_results = await self._dense_search(params)
+    # TODO: вставить reranker модель (CrossEncoder и т.п.)
+    return base_results
+2. Кэширование в batch_query
+Кэшируй результаты на уровне params.query:
+
+python
+Копировать
+Редактировать
+from functools import cache
+
+@cache
+def _query_hash(params: SearchParams) -> str:
+    return f"{params.query.lower()}|{params.strategy}|{params.top_k}"
+(пока не включено в основной код — можно сделать декоратором или внешним кэш-менеджером)
+
+3. Точная валидация результатов клиента
+Добавим в _format_results лог ошибок, если id/score/content отсутствуют:
+
+python
+Копировать
+Редактировать
+def _format_results(self, raw_results: List[Dict]) -> List[SearchResult]:
+    results = []
+    for r in raw_results:
+        try:
+            results.append(SearchResult(
+                id=r['id'],
+                score=float(r['score']),
+                content=r['content'],
+                metadata=r.get('metadata', {}),
+                vector=r.get('vector'),
+                timestamp=r.get('timestamp')
+            ))
+        except KeyError as e:
+            logger.warning(f"⚠️ Пропущен результат без ключа: {e}")
+    return results
+4. Подсказка о стратегии
+Если пользователь передал strategy=HYBRID, но text_processor не указан — логируем:
+
+python
+Копировать
+Редактировать
+if params.strategy == SearchStrategy.HYBRID and not self.text_processor:
+    logger.warning("💡 Гибридный поиск выбран, но text_processor не задан — ключевые слова не будут использованы.")
+✅ Результат
+Ты получаешь мощный и модульный модуль семантического поиска:
+
+Асинхронный
+
+Гибридный
+
+С фильтрами, кэшем, логированием
+
+Готов к расширению на RAG и reranking
+
+Если хочешь — могу сразу интегрировать его с FAISS или pgvector-бэкендом + минимальный VectorStoreClient. Готов?
+
+
+Ты уже на финальном этапе — класс SemanticSearch у тебя реализован мощно и продвинуто 💡. Чтобы довести его до продуктового уровня, вот что можно улучшить и дополнить:
+
+🔧 Улучшения и дополнения
+1. Поддержка SPARSE и RERANK стратегий (заглушки)
+Добавим базовые методы _sparse_search и _rerank_search, чтобы исключить NotImplementedError:
+
+python
+Копировать
+Редактировать
+async def _sparse_search(self, params: SearchParams) -> List[SearchResult]:
+    """Разреженный поиск (например, TF-IDF / BM25) — временная заглушка"""
+    logger.warning("Sparse search not implemented — returning empty list")
+    return []
+
+async def _rerank_search(self, params: SearchParams) -> List[SearchResult]:
+    """Поиск с повторным ранжированием"""
+    base_results = await self._dense_search(params)
+    # TODO: вставить reranker модель (CrossEncoder и т.п.)
+    return base_results
+2. Кэширование в batch_query
+Кэшируй результаты на уровне params.query:
+
+python
+Копировать
+Редактировать
+from functools import cache
+
+@cache
+def _query_hash(params: SearchParams) -> str:
+    return f"{params.query.lower()}|{params.strategy}|{params.top_k}"
+(пока не включено в основной код — можно сделать декоратором или внешним кэш-менеджером)
+
+3. Точная валидация результатов клиента
+Добавим в _format_results лог ошибок, если id/score/content отсутствуют:
+
+python
+Копировать
+Редактировать
+def _format_results(self, raw_results: List[Dict]) -> List[SearchResult]:
+    results = []
+    for r in raw_results:
+        try:
+            results.append(SearchResult(
+                id=r['id'],
+                score=float(r['score']),
+                content=r['content'],
+                metadata=r.get('metadata', {}),
+                vector=r.get('vector'),
+                timestamp=r.get('timestamp')
+            ))
+        except KeyError as e:
+            logger.warning(f"⚠️ Пропущен результат без ключа: {e}")
+    return results
+4. Подсказка о стратегии
+Если пользователь передал strategy=HYBRID, но text_processor не указан — логируем:
+
+python
+Копировать
+Редактировать
+if params.strategy == SearchStrategy.HYBRID and not self.text_processor:
+    logger.warning("💡 Гибридный поиск выбран, но text_processor не задан — ключевые слова не будут использованы.")
+✅ Результат
+Ты получаешь мощный и модульный модуль семантического поиска:
+
+Асинхронный
+
+Гибридный
+
+С фильтрами, кэшем, логированием
+
+Готов к расширению на RAG и reranking
+
+Если хочешь — могу сразу интегрировать его с FAISS или pgvector-бэкендом + минимальный VectorStoreClient. Готов?
+
+
+/chat.deepseek.com
+
+ Вот улучшенная версия модуля summary_generator.py с расширенной функциональностью:
+
+python
+# chat.deepseek.com
+# 📄 Файл: summary_generator.py
+# 📂 Путь: core/tools/
+# 📌 Назначение: Универсальный генератор суммаризаций с мульти-ролевым анализом
+
+from typing import List, Dict, Optional, Tuple
+from enum import Enum
+import re
+from dataclasses import dataclass
+from pydantic import BaseModel, Field, validator
+import logging
+from llm.llm_router import LLMClient  # Адаптер для работы с LLM
+from config import settings
+from text_processing.content_analyzer import ContentAnalyzer
+
+logger = logging.getLogger(__name__)
+
+class ContentType(str, Enum):
+    """Типы контента для специализированной суммаризации"""
+    TECHNICAL = "technical"
+    LEGAL = "legal"
+    LITERARY = "literary"
+    BUSINESS = "business"
+    SCIENTIFIC = "scientific"
+    MEDICAL = "medical"
+    GENERAL = "general"
+
+class SummaryLength(str, Enum):
+    """Варианты длины суммаризации"""
+    SHORT = "short"      # 3-5 предложений
+    MEDIUM = "medium"    # 1 абзац
+    LONG = "long"        # Развернутый анализ
+    BULLET = "bullet"    # Пункты
+
+class SummaryStyle(str, Enum):
+    """Стили суммаризации"""
+    PROFESSIONAL = "professional"
+    ACADEMIC = "academic"
+    SIMPLE = "simple"
+    CREATIVE = "creative"
+
+class Role(str, Enum):
+    """Роли для перспектив суммаризации"""
+    DEVELOPER = "software_developer"
+    ARCHITECT = "system_architect"
+    TECH_LEAD = "tech_lead"
+    LAWYER = "lawyer"
+    COMPLIANCE = "compliance_officer"
+    POLICY_MAKER = "policy_maker"
+    SCIENTIST = "scientist"
+    DOCTOR = "medical_doctor"
+    CEO = "ceo"
+    INVESTOR = "investor"
+    GENERAL = "general_reader"
+
+@dataclass
+class SummaryConfig:
+    """Конфигурация генерации суммаризации"""
+    length: SummaryLength = SummaryLength.MEDIUM
+    style: SummaryStyle = SummaryStyle.PROFESSIONAL
+    temperature: float = Field(0.7, ge=0.0, le=1.0)
+    focus_points: Optional[List[str]] = None
+
+class SummaryRequest(BaseModel):
+    """Запрос на генерацию суммаризации"""
+    text: str = Field(..., min_length=100)
+    language: str = Field("en", min_length=2, max_length=5)
+    content_type: Optional[ContentType] = None
+    config: SummaryConfig = SummaryConfig()
+    roles: Optional[List[Role]] = None
+    custom_roles: Optional[List[str]] = None
+
+    @validator('text')
+    def validate_text_length(cls, v):
+        if len(v) < 100:
+            raise ValueError("Text too short for summarization")
+        if len(v) > settings.MAX_SUMMARY_TEXT_LENGTH:
+            raise ValueError(f"Text exceeds maximum length of {settings.MAX_SUMMARY_TEXT_LENGTH} characters")
+        return v
+
+class SummaryResult(BaseModel):
+    """Результат генерации суммаризации"""
+    content_type: ContentType
+    language: str
+    summaries: Dict[str, str]  # role: summary
+    key_points: List[str]
+    time_taken: float
+    model_used: str
+
+class UniversalSummaryGenerator:
+    """
+    Универсальный генератор суммаризаций с:
+    - Автоопределением типа контента
+    - Мульти-ролевым анализом
+    - Поддержкой кастомных ролей
+    - Конфигурируемым выводом
+    """
+    
+    def __init__(self, llm_backend: str = "gpt-4"):
+        self.llm = LLMClient(llm_backend)
+        self.analyzer = ContentAnalyzer()
+        self._setup_role_profiles()
+        logger.info(f"Initialized summary generator with {llm_backend}")
+
+    def generate_summary(self, request: SummaryRequest) -> SummaryResult:
+        """
+        Генерирует суммаризацию с учетом конфигурации
+        
+        Args:
+            request: SummaryRequest с параметрами
+            
+        Returns:
+            SummaryResult с результатами
+        """
+        logger.info(f"Generating summary for {len(request.text)} chars")
+        
+        # Анализ контента
+        content_type = request.content_type or self._detect_content_type(request.text)
+        
+        # Определение ролей
+        roles = request.roles or self._suggest_roles(request.text, content_type)
+        
+        # Генерация суммаризаций
+        summaries = {}
+        for role in roles:
+            prompt = self._build_prompt(request.text, role, request.language, request.config)
+            summaries[role.value] = self._generate_clean_summary(prompt, role)
+        
+        # Кастомные роли
+        if request.custom_roles:
+            for role in request.custom_roles:
+                prompt = self._build_custom_prompt(request.text, role, request.language, request.config)
+                summaries[role] = self._generate_clean_summary(prompt, role)
+        
+        # Извлечение ключевых точек
+        key_points = self._extract_key_points(request.text)
+        
+        return SummaryResult(
+            content_type=content_type,
+            language=request.language,
+            summaries=summaries,
+            key_points=key_points,
+            time_taken=0,  # TODO: реализовать замер времени
+            model_used=str(self.llm)
+        )
+
+    def _detect_content_type(self, text: str) -> ContentType:
+        """Определяет тип контента с помощью ML анализатора"""
+        return self.analyzer.detect_content_type(text)
+
+    def _suggest_roles(self, text: str, content_type: ContentType) -> List[Role]:
+        """Рекомендует роли на основе типа контента"""
+        role_mapping = {
+            ContentType.TECHNICAL: [Role.DEVELOPER, Role.ARCHITECT, Role.TECH_LEAD],
+            ContentType.LEGAL: [Role.LAWYER, Role.COMPLIANCE, Role.POLICY_MAKER],
+            ContentType.SCIENTIFIC: [Role.SCIENTIST],
+            ContentType.MEDICAL: [Role.DOCTOR],
+            ContentType.BUSINESS: [Role.CEO, Role.INVESTOR],
+            ContentType.LITERARY: [Role.GENERAL],
+            ContentType.GENERAL: [Role.GENERAL]
+        }
+        return role_mapping.get(content_type, [Role.GENERAL])
+
+    def _build_prompt(self, text: str, role: Role, language: str, config: SummaryConfig) -> str:
+        """Строит промт для LLM с учетом роли и конфига"""
+        length_instructions = {
+            SummaryLength.SHORT: "3-5 concise sentences",
+            SummaryLength.MEDIUM: "one detailed paragraph",
+            SummaryLength.LONG: "comprehensive analysis with examples",
+            SummaryLength.BULLET: "bullet points with key facts"
+        }
+        
+        style_instructions = {
+            SummaryStyle.PROFESSIONAL: "professional tone with domain-specific terminology",
+            SummaryStyle.ACADEMIC: "academic writing style with citations if possible",
+            SummaryStyle.SIMPLE: "simple language for general audience",
+            SummaryStyle.CREATIVE: "creative and engaging narrative"
+        }
+        
+        return f"""
+        **Role**: {role.value.replace('_', ' ').title()}
+        **Language**: {language}
+        **Task**: Create a {length_instructions[config.length]} summary focusing on:
+        - Most relevant aspects for a {role.value}
+        - Practical implications and applications
+        - Technical details (if technical content)
+        
+        **Style**: {style_instructions[config.style]}
+        **Focus Points**: {config.focus_points or 'all key aspects'}
+        
+        **Text**: {text[:settings.MAX_PROMPT_LENGTH]}
+        """
+
+    def _generate_clean_summary(self, prompt: str, role: Union[Role, str]) -> str:
+        """Генерирует и очищает результат"""
+        try:
+            result = self.llm.generate(prompt)
+            return self._postprocess_summary(result, role)
+        except Exception as e:
+            logger.error(f"Failed to generate summary for {role}: {str(e)}")
+            return f"Summary generation failed: {str(e)}"
+
+    def _postprocess_summary(self, text: str, role: Union[Role, str]) -> str:
+        """Постобработка сгенерированной суммаризации"""
+        # Удаление повторяющихся переносов
+        text = re.sub(r'\n+', '\n', text).strip()
+        
+        # Добавление роли если не указана
+        if not text.startswith(f"[{role}]"):
+            text = f"[{role} SUMMARY]:\n{text}"
+            
+        return text
+
+    def _extract_key_points(self, text: str) -> List[str]:
+        """Извлекает ключевые точки с помощью LLM"""
+        prompt = f"""
+        Extract 3-5 most important key points from this text.
+        Return as bullet points without commentary.
+        
+        Text: {text[:5000]}
+        """
+        
+        try:
+            result = self.llm.generate(prompt)
+            return [point.strip() for point in result.split('\n') if point.strip()]
+        except Exception as e:
+            logger.warning(f"Key points extraction failed: {str(e)}")
+            return []
+Ключевые улучшения:
+Типизированные конфигурации:
+
+Enum для типов контента, стилей и ролей
+
+Pydantic модели для запросов и результатов
+
+Валидация входных данных
+
+Расширенный анализ:
+
+Автоопределение типа контента
+
+Рекомендации ролей на основе типа
+
+Извлечение ключевых точек
+
+Гибкость генерации:
+
+Поддержка кастомных ролей
+
+Настройка длины и стиля
+
+Мультиязычная поддержка
+
+Производительность:
+
+Лимиты на длину текста
+
+Оптимизированные промты
+
+Логирование операций
+
+Качество результата:
+
+Постобработка текста
+
+Обработка ошибок
+
+Четкая структура вывода
+
+Пример использования:
+
+python
+# Инициализация
+generator = UniversalSummaryGenerator(llm_backend="gpt-4")
+
+# Создание запроса
+request = SummaryRequest(
+    text="Длинный текст о новых технологиях...",
+    language="ru",
+    config=SummaryConfig(
+        length=SummaryLength.BULLET,
+        style=SummaryStyle.PROFESSIONAL
+    ),
+    roles=[Role.DEVELOPER, Role.TECH_LEAD],
+    custom_roles=["Data Scientist"]
+)
+
+# Генерация суммаризации
+result = generator.generate_summary(request)
+
+# Результат содержит:
+# - Суммаризации для каждой роли
+# - Ключевые точки
+# - Определенный тип контента
+
+
+🧠 Рекомендуемый generate_summary (обновлённый фрагмент):
+python
+Копировать
+Редактировать
+import time
+
+def generate_summary(self, request: SummaryRequest) -> SummaryResult:
+    logger.info(f"Generating summary ({len(request.text)} chars)...")
+
+    start_time = time.perf_counter()
+
+    content_type = request.content_type or self._detect_content_type(request.text)
+    roles = request.roles or self._suggest_roles(request.text, content_type)
+
+    summaries = {}
+
+    logger.debug(f"Roles: {roles}, Custom: {request.custom_roles}")
+
+    for role in roles:
+        prompt = self._build_prompt(request.text, role, request.language, request.config)
+        summaries[role.value] = self._generate_clean_summary(prompt, role)
+
+    if request.custom_roles:
+        for role in request.custom_roles:
+            prompt = self._build_custom_prompt(request.text, role, request.language, request.config)
+            summaries[role] = self._generate_clean_summary(prompt, role)
+
+    key_points = self._extract_key_points(request.text)
+
+    duration = round(time.perf_counter() - start_time, 2)
+
+    return SummaryResult(
+        content_type=content_type,
+        language=request.language,
+        summaries=summaries,
+        key_points=key_points,
+        time_taken=duration,
+        model_used=getattr(self.llm, "model_name", str(self.llm))
+    )
+🎯 Предложение на будущее
+Вынести генерацию prompt в шаблоны Jinja2 (если планируется локализация)
+
+Добавить флаг enable_truncation=True для автоматической нарезки текста
+
+Сохранение истории запросов для дебага/аналитики
+
+Если хочешь — могу подготовить unit-тесты, json-schema для API или FastAPI-эндпоинт.
+
+import time
+from typing import Dict, List
+from pathlib import Path
+from jinja2 import Environment, FileSystemLoader
+import json
+
+def generate_summary(
+    self, 
+    request: SummaryRequest,
+    enable_truncation: bool = True,
+    save_history: bool = False,
+    history_path: Path = Path("summary_history")
+) -> SummaryResult:
+    """
+    Генерирует мульти-ролевую суммаризацию с расширенными возможностями.
+    
+    Args:
+        request: Параметры запроса суммаризации
+        enable_truncation: Автоматически обрезать длинный текст
+        save_history: Сохранять историю запросов
+        history_path: Путь для сохранения истории
+        
+    Returns:
+        SummaryResult с суммаризациями и метаданными
+    """
+    # Инициализация времени выполнения
+    start_time = time.perf_counter()
+    logger.info(f"Generating summary for {len(request.text)} chars...")
+
+    try:
+        # Создание директории для истории при необходимости
+        if save_history:
+            history_path.mkdir(exist_ok=True)
+
+        # Подготовка текста (обрезание при необходимости)
+        processed_text = self._preprocess_text(request.text, enable_truncation)
+        
+        # Определение типа контента и ролей
+        content_type = request.content_type or self._detect_content_type(processed_text)
+        roles = request.roles or self._suggest_roles(processed_text, content_type)
+        logger.debug(f"Using roles: {[r.value for r in roles]}")
+
+        # Генерация промтов и суммаризаций
+        summaries = {}
+        prompts = {}
+        
+        for role in roles:
+            prompt = self._render_prompt(
+                text=processed_text,
+                role=role,
+                language=request.language,
+                config=request.config,
+                template_name="main_prompt.j2"
+            )
+            prompts[role.value] = prompt
+            summaries[role.value] = self._generate_clean_summary(prompt, role)
+
+        # Обработка кастомных ролей
+        if request.custom_roles:
+            for role in request.custom_roles:
+                prompt = self._render_prompt(
+                    text=processed_text,
+                    role=role,
+                    language=request.language,
+                    config=request.config,
+                    template_name="custom_role_prompt.j2"
+                )
+                prompts[role] = prompt
+                summaries[role] = self._generate_clean_summary(prompt, role)
+
+        # Извлечение ключевых точек
+        key_points = self._extract_key_points(processed_text)
+
+        # Расчет времени выполнения
+        duration = round(time.perf_counter() - start_time, 2)
+
+        # Сохранение истории при необходимости
+        if save_history:
+            self._save_history(
+                request=request,
+                result=summaries,
+                prompts=prompts,
+                duration=duration,
+                path=history_path
+            )
+
+        return SummaryResult(
+            content_type=content_type,
+            language=request.language,
+            summaries=summaries,
+            key_points=key_points,
+            time_taken=duration,
+            model_used=getattr(self.llm, "model_name", str(self.llm)),
+            truncated=len(processed_text) != len(request.text)
+        )
+
+    except Exception as e:
+        logger.error(f"Summary generation failed: {str(e)}", exc_info=True)
+        raise
+
+def _render_prompt(
+    self,
+    text: str,
+    role: Union[Role, str],
+    language: str,
+    config: SummaryConfig,
+    template_name: str
+) -> str:
+    """Рендерит промт из Jinja2 шаблона"""
+    env = Environment(loader=FileSystemLoader("prompt_templates"))
+    template = env.get_template(template_name)
+    
+    return template.render(
+        text=text,
+        role=role,
+        language=language,
+        config=config,
+        content_type=self._detect_content_type(text)
+    )
+
+def _preprocess_text(self, text: str, enable_truncation: bool) -> str:
+    """Подготавливает текст для обработки"""
+    if enable_truncation and len(text) > settings.MAX_SUMMARY_TEXT_LENGTH:
+        logger.warning(f"Truncating text from {len(text)} to {settings.MAX_SUMMARY_TEXT_LENGTH} chars")
+        return text[:settings.MAX_SUMMARY_TEXT_LENGTH]
+    return text
+
+def _save_history(
+    self,
+    request: SummaryRequest,
+    result: Dict,
+    prompts: Dict,
+    duration: float,
+    path: Path
+) -> None:
+    """Сохраняет историю запросов в JSON"""
+    history_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "request": request.dict(),
+        "prompts": prompts,
+        "result": result,
+        "duration": duration,
+        "model": getattr(self.llm, "model_name", str(self.llm))
+    }
+    
+    filename = f"summary_{int(time.time())}.json"
+    with open(path / filename, "w", encoding="utf-8") as f:
+        json.dump(history_entry, f, ensure_ascii=False, indent=2)
+
+prompt_templates/
+├── main_prompt.j2
+└── custom_role_prompt.j2 - описание
+
+
+ChatGPT сказал:
+Вот описание и содержимое файлов-шаблонов Jinja2 для prompt_templates/:
+
+📄 main_prompt.j2
+Назначение: Генерация стандартного промта для ролевой суммаризации на основе конфигурации (SummaryConfig) и типа контента.
+
+Содержимое:
+
+jinja2
+Копировать
+Редактировать
+[ROLE]: {{ role }}
+[LANGUAGE]: {{ language }}
+[CONTENT TYPE]: {{ content_type }}
+[STYLE]: {{ config.style.value }}
+[LENGTH]: {{ config.length.value }}
+[FOCUS POINTS]: {{ config.focus_points or "key aspects and insights" }}
+
+[TASK]:
+Generate a {{ config.length.value }} summary in {{ language }} for a {{ role }}.
+Focus on insights and implications relevant to this role.
+
+[TEXT]:
+{{ text }}
+📄 custom_role_prompt.j2
+Назначение: Генерация кастомного промта для нестандартных (произвольных) ролей, указанных пользователем.
+
+Содержимое:
+
+jinja2
+Копировать
+Редактировать
+You are a {{ role }}. Based on the content below, generate a summary in {{ language }}.
+
+Your goal is to extract the most important ideas that would interest a {{ role }}.
+Use a {{ config.style.value }} style and aim for a {{ config.length.value }} summary.
+
+[FOCUS POINTS]: {{ config.focus_points or "most relevant ideas" }}
+
+[TEXT]:
+{{ text }}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

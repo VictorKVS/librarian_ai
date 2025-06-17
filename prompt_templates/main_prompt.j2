@@ -1,0 +1,13 @@
+[ROLE]: {{ role }}
+[LANGUAGE]: {{ language }}
+[CONTENT TYPE]: {{ content_type }}
+[STYLE]: {{ config.style.value }}
+[LENGTH]: {{ config.length.value }}
+[FOCUS POINTS]: {{ config.focus_points or "key aspects and insights" }}
+
+[TASK]:
+Generate a {{ config.length.value }} summary in {{ language }} for a {{ role }}.
+Focus on insights and implications relevant to this role.
+
+[TEXT]:
+{{ text }}
