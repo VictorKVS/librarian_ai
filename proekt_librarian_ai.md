@@ -12172,9 +12172,561 @@ Use a {{ config.style.value }} style and aim for a {{ config.length.value }} sum
 [TEXT]:
 {{ text }}
 
+Что такое INSTALL.md?
+INSTALL.md — это файл с пошаговой инструкцией по установке проекта. Он отвечает на вопрос "Как запустить это у себя?" и дополняет README.md, где обычно больше фокус на идее и функциональности.
+
+🧩 Зачем он нужен?
+Упрощает вход новичкам
+Позволяет быстро начать работу без необходимости разбираться в структуре вручную.
+
+Документирует зависимости и окружение
+Указывает конкретные версии Python, пакетов, переменные .env, инструкции для Docker и т. д.
+
+Обеспечивает повторяемость установки
+Особенно важно для командной разработки и CI/CD.
+
+Отделяет установку от пользовательского интерфейса
+README отвечает на "что это такое", INSTALL — на "как это установить".
+
+📁 Пример содержания INSTALL.md
+markdown
+Копировать
+Редактировать
+# 🚀 Установка Librarian AI Mini Core
+
+## 🔧 Требования
+
+- Python 3.10+
+- pip / poetry
+- (опционально) Redis + Celery
+- (опционально) Docker
+
+## 📥 Установка (локально)
+
+```bash
+git clone https://github.com/your-org/librarian_ai.git
+cd librarian_ai
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+🗃️ Инициализация базы
+bash
+Копировать
+Редактировать
+python db/create_tables.py
+⚙️ Настройка переменных
+Создайте .env файл:
+
+dotenv
+Копировать
+Редактировать
+DB_URL=sqlite:///./librarian.db
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+USE_FAISS=true
+🧪 Проверка
+bash
+Копировать
+Редактировать
+python scripts/ingest_and_index.py sample.pdf
+🐳 Docker (опционально)
+bash
+Копировать
+Редактировать
+docker-compose up --build
+🧠 Запуск пайплайна
+Celery: celery -A core.tasks.async_tasks worker --loglevel=info
+
+FastAPI: uvicorn api.main:app --reload
+
+📞 Поддержка
+Если возникли ошибки — см. logs/, GitHub Issues или [Telegram канал].
+
+yaml
+Копировать
+Редактировать
+
+---
+
+Готов создать `INSTALL.md` с актуальной инфой?
 
 
+# 📦 Установка Librarian AI: Mini Core
 
+Этот документ описывает процесс установки минимального ядра Librarian AI — интеллектуальной платформы для анализа, аннотации и поиска по документам.
+
+---
+
+## 🧩 Предварительные требования
+
+- Python 3.10+
+- pip (или poetry)
+- Git
+- (опционально) Redis (для Celery)
+- (опционально) Docker + Docker Compose
+
+---
+
+## ⚙️ 1. Клонирование проекта
+
+```bash
+git clone https://github.com/your-org/librarian_ai.git
+cd librarian_ai
+```
+
+---
+
+## 🐍 2. Установка зависимостей (через venv)
+
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+---
+
+## 🗃️ 3. Настройка переменных окружения
+
+Создайте файл `.env` в корне проекта:
+
+```env
+DB_URL=sqlite:///./librarian.db
+REDIS_URL=redis://localhost:6379/0
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+USE_FAISS=true
+```
+
+> 🔐 Не добавляйте `.env` в Git. Используйте `.env.example` для шаблона.
+
+---
+
+## 🛠️ 4. Инициализация базы данных
+
+```bash
+python db/create_tables.py
+```
+
+---
+
+## 🚀 5. Первый запуск (ручной пайплайн)
+
+```bash
+python scripts/ingest_and_index.py path/to/document.pdf
+```
+
+---
+
+## ⚙️ 6. Фоновая обработка (Celery + Redis)
+
+### Установите и запустите Redis:
+
+```bash
+sudo apt install redis
+redis-server
+```
+
+### Запустите Celery:
+
+```bash
+celery -A core.tasks.async_tasks worker --loglevel=info
+```
+
+---
+
+## 🌐 7. Запуск API (FastAPI)
+
+```bash
+uvicorn api.documents:app --reload
+```
+
+---
+
+## 🐳 8. Альтернатива: установка через Docker
+
+```bash
+docker-compose up --build
+```
+
+---
+
+## ✅ Проверка установки
+
+- Перейдите на [http://localhost:8000/docs](http://localhost:8000/docs) для Swagger UI
+- Загрузите тестовый документ: `python scripts/ingest_and_index.py examples/demo.txt`
+- Убедитесь, что создаются чанки и эмбеддинги в SQLite или FAISS
+
+---
+
+## 🧠 Дополнительно
+
+- `prompt_templates/` — шаблоны суммаризации на основе Jinja2
+- `core/tools/summary_generator.py` — универсальная система TL;DR по ролям
+- `db/models.py` — ORM-модели документов, сущностей и графов
+
+---
+
+## 🧑‍💻 Контакты и поддержка
+
+Если возникли проблемы, откройте Issue на GitHub или напишите в [чат/канал сообщества].
+
+Вот финальная улучшенная версия документации с внесением всех изменений:
+
+📦 Установка Librarian AI: Mini Core
+🧩 Предварительные требования
+Базовые:
+Python 3.10-3.11 (не поддерживает 3.12)
+
+Git 2.30+
+
+SQLite3 (встроен) или PostgreSQL 14-16
+
+Расширенные (опционально):
+Redis 6.2+ (для очередей)
+
+Docker 24.0+ и Docker Compose 2.20+
+
+FAISS 1.7.4 (для векторного поиска)
+
+CUDA 11.8 (для GPU)
+
+⚠️ Проверьте версии:
+python --version
+docker --version
+
+⚙️ 1. Получение кода
+bash
+git clone --branch stable https://github.com/your-org/librarian_ai.git
+cd librarian_ai
+git submodule update --init  # если есть подмодули
+🐍 2. Установка зависимостей
+Вариант A: Виртуальное окружение
+bash
+python -m venv .venv && source .venv/bin/activate
+pip install --upgrade pip wheel setuptools
+pip install -r requirements.txt --no-cache-dir
+Вариант B: Poetry
+bash
+curl -sSL https://install.python-poetry.org | python -
+poetry config virtualenvs.in-project true
+poetry install --only main
+🗃️ 3. Конфигурация
+Скопируйте и настройте .env:
+
+bash
+cp .env.example .env
+nano .env  # или ваш редактор
+Критичные настройки:
+
+ini
+# ДБ (обязательно)
+DB_URL=postgresql+asyncpg://user:password@localhost:5432/librarian
+
+# Безопасность
+SECRET_KEY=сгенерируйте_через_openssl_rand_hex_32
+JWT_ALGORITHM=HS256
+
+# Векторизация
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+🛠️ 4. Инициализация БД
+Автоматическая настройка:
+bash
+python -m db.setup --init --sample-data
+Вручную:
+bash
+alembic upgrade head
+python -m db.seed_data  # тестовые данные
+🚀 5. Запуск системы
+Стандартный режим:
+bash
+uvicorn api.main:app --host 0.0.0.0 --port 8000 \
+  --workers 2 \
+  --ssl-keyfile=./certs/key.pem \
+  --ssl-certfile=./certs/cert.pem
+Фоновые задачи:
+bash
+celery -A core.tasks worker --concurrency=4 -E -P threads
+celery -A core.tasks beat --loglevel=info
+🐳 Docker-развертывание
+Подготовка:
+
+bash
+mkdir -p ./data/{db,redis,documents}
+Запуск:
+
+bash
+docker-compose up -d --scale api=2 --scale worker=3
+Мониторинг:
+
+bash
+docker-compose logs -f --tail=50
+✅ Верификация установки
+Проверка API:
+
+bash
+curl -X GET "https://localhost:8000/health" \
+  -H "Authorization: Bearer TEST_TOKEN"
+Тест обработки:
+
+bash
+python -m scripts.process_document \
+  --file ./examples/sample.pdf \
+  --strategy fast
+Проверка поиска:
+
+bash
+python -m scripts.search "AI технологии" --top-k 5
+🛠️ Утилиты обслуживания
+Команда	Назначение
+python -m db.optimize	Оптимизация БД
+python -m scripts.backup --output ./backups	Резервное копирование
+python -m monitoring.disk_usage --threshold 90	Контроль места
+🆘 Диагностика проблем
+Сбор логов:
+
+bash
+python -m diagnostics.collect_logs --output debug.zip
+Проверка зависимостей:
+
+bash
+python -m pip check
+Тест производительности:
+
+bash
+python -m tests.benchmark --workers 10 --requests 100
+📌 Важные заметки
+Для продакшн-развертывания:
+
+Используйте reverse proxy (Nginx)
+
+Настройте автообновление сертификатов
+
+Регулярно обновляйте зависимости
+
+При обновлениях:
+
+bash
+git pull origin stable
+alembic upgrade head
+python -m pip install --upgrade -r requirements.txt
+Контакты поддержки:
+
+Чат: [Telegram Group]
+
+Экстренные случаи: admin@librarian-ai.example.com
+
+Полная документация доступна в docs/advanced_setup.md
+
+# 📦 Установка Librarian AI: Mini Core
+
+## 🧩 Предварительные требования
+
+**Базовые:**
+- Python 3.10–3.11 (не поддерживает 3.12)
+- Git 2.30+
+- SQLite3 (встроен) или PostgreSQL 14–16
+
+**Расширенные (опционально):**
+- Redis 6.2+ (для очередей)
+- Docker 24.0+ и Docker Compose 2.20+
+- FAISS 1.7.4 (для векторного поиска)
+- CUDA 11.8 (для GPU)
+
+⚠️ Проверьте версии:
+```bash
+python --version
+docker --version
+```
+
+---
+
+## ⚙️ 1. Получение кода
+```bash
+git clone --branch stable https://github.com/your-org/librarian_ai.git
+cd librarian_ai
+git submodule update --init  # если есть подмодули
+```
+
+---
+
+## 🐍 2. Установка зависимостей
+
+**Вариант A: Виртуальное окружение**
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install --upgrade pip wheel setuptools
+pip install -r requirements.txt --no-cache-dir
+```
+
+**Вариант B: Poetry**
+```bash
+curl -sSL https://install.python-poetry.org | python -
+poetry config virtualenvs.in-project true
+poetry install --only main
+```
+
+---
+
+## 🗃️ 3. Конфигурация
+Скопируйте и настройте `.env`:
+```bash
+cp .env.example .env
+nano .env  # или ваш редактор
+```
+
+**Критичные настройки:**
+```ini
+# ДБ (обязательно)
+DB_URL=postgresql+asyncpg://user:password@localhost:5432/librarian
+
+# Безопасность
+SECRET_KEY=сгенерируйте_через_openssl_rand_hex_32
+JWT_ALGORITHM=HS256
+
+# Векторизация
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+```
+
+---
+
+## 🛠️ 4. Инициализация БД
+
+**Автоматическая настройка:**
+```bash
+python -m db.setup --init --sample-data
+```
+
+**Вручную:**
+```bash
+alembic upgrade head
+python -m db.seed_data  # тестовые данные
+```
+
+---
+
+## 🚀 5. Запуск системы
+
+**Стандартный режим:**
+```bash
+uvicorn api.main:app --host 0.0.0.0 --port 8000 \
+  --workers 2 \
+  --ssl-keyfile=./certs/key.pem \
+  --ssl-certfile=./certs/cert.pem
+```
+
+**Фоновые задачи:**
+```bash
+celery -A core.tasks worker --concurrency=4 -E -P threads
+celery -A core.tasks beat --loglevel=info
+```
+
+---
+
+## 🐳 Docker-развертывание
+
+**Подготовка:**
+```bash
+mkdir -p ./data/{db,redis,documents}
+```
+
+**Запуск:**
+```bash
+docker-compose up -d --scale api=2 --scale worker=3
+```
+
+**Мониторинг:**
+```bash
+docker-compose logs -f --tail=50
+```
+
+---
+
+## ✅ Верификация установки
+
+**Проверка API:**
+```bash
+curl -X GET "https://localhost:8000/health" \
+  -H "Authorization: Bearer TEST_TOKEN"
+```
+
+**Тест обработки:**
+```bash
+python -m scripts.process_document \
+  --file ./examples/sample.pdf \
+  --strategy fast
+```
+
+**Проверка поиска:**
+```bash
+python -m scripts.search "AI технологии" --top-k 5
+```
+
+---
+
+## 🛠️ Утилиты обслуживания
+
+| Команда | Назначение |
+|--------|------------|
+| `python -m db.optimize` | Оптимизация БД |
+| `python -m scripts.backup --output ./backups` | Резервное копирование |
+| `python -m monitoring.disk_usage --threshold 90` | Контроль места |
+
+---
+
+## 🆘 Диагностика проблем
+
+**Сбор логов:**
+```bash
+python -m diagnostics.collect_logs --output debug.zip
+```
+
+**Проверка зависимостей:**
+```bash
+python -m pip check
+```
+
+**Тест производительности:**
+```bash
+python -m tests.benchmark --workers 10 --requests 100
+```
+
+---
+
+## 📌 Важные заметки
+
+Для продакшн-развертывания:
+- Используйте reverse proxy (Nginx)
+- Настройте автообновление сертификатов
+- Регулярно обновляйте зависимости
+
+При обновлениях:
+```bash
+git pull origin stable
+alembic upgrade head
+python -m pip install --upgrade -r requirements.txt
+```
+
+Контакты поддержки:
+- Чат: [Telegram Group]
+- Экстренные случаи: admin@librarian-ai.example.com
+
+Полная документация доступна в `docs/advanced_setup.md`
+
+Идеальное место для INSTALL.md — в корне проекта, рядом с README.md.
+
+📁 Пример расположения:
+
+Копировать
+Редактировать
+librarian_ai/
+├── README.md
+├── INSTALL.md      ← вот здесь
+├── requirements.txt
+├── .env.example
+├── core/
+├── api/
+└── ...
+Так его можно легко найти при первом знакомстве с проектом, и GitHub автоматически отобразит его рядом с README, если использовать GitHub Pages или документацию.
 
 
 

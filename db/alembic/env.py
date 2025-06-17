@@ -1,5 +1,5 @@
 # 📄 Файл: env.py
-# 📂 Путь: db/alembic/
+# 📂 Путь: db/alembic/env.py
 # 📌 Назначение: Связывает Alembic с SQLAlchemy metadata и URL базы данных
 
 import logging
